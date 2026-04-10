@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <!-- Meta tag essencial para comportamento de App no Android (evita zoom acidental e quebras de layout) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Painel Covetrus - Mobile</title>
+    
+    <!-- Bibliotecas CSS e JS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    
+    <!-- Choices.js -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+
+    <style>
+        /* Ajustes base para Mobile */
+        body { -webkit-tap-highlight-color: transparent; }
+        
+        .chart-container { position: relative; width: 100%; height: 100%; min-height: 300px; }
+        @media (max-width: 768px) {
+            .chart-container { min-height: 280px; }
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        .bg-brand-primary { background-color: #004b87; }
+        .text-brand-primary { color: #004b87; }
+        .bg-brand-secondary { background-color: #00a3e0; }
+        .bg-brand-action { background-color: #10b981; } 
+        
+        /* Choices.js Otimizado para Android/Touch */
+        .choices__inner { background-color: #f8fafc; border-color: #cbd5e1; border-radius: 0.5rem; min-height: 44px; padding: 6px 10px; font-size: 14px;}
+        .choices__list--multiple .choices__item { background-color: #00a3e0; border: none; border-radius: 6px; padding: 4px 8px;}
+        .choices__list--dropdown { 
+            z-index: 99999 !important; /* Garante que ficará acima de qualquer gráfico */
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+        } 
+        /* Rolagem suave nativa para a lista do filtro no celular */
+        .choices__list--dropdown .choices__list {
+            -webkit-overflow-scrolling: touch; 
+        }
+        
+        table th { position: sticky; top: 0; background-color: #f8fafc; z-index: 10; }
+        .th-filter-row th { top: 38px; }
+        
+        .hide-scroll-mobile::-webkit-scrollbar { display: none; }
+        .hide-scroll-mobile { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Cabeçalho Compacto -->
+    <header class="bg-brand-primary text-white shadow-md z-30 shrink-0">
+        <div class="px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">📊</span>
+                <div class="leading-tight">
+                    <h1 class="text-lg font-bold">Painel de Vendas</h1>
+                    <p class="text-[10px] text-blue-200 uppercase tracking-wide">Covetrus Analytics</p>
+                </div>
+            </div>
+            <div>
+                <input type="file" id="fileInput" accept=".xlsx" class="hidden">
+                <label for="fileInput" class="bg-brand-action text-white px-3 py-2 md:px-4 md:py-2 rounded-lg font-bold cursor-pointer shadow-lg flex items-center gap-2 text-xs md:text-sm active:scale-95 transition-transform">
+                    <span class="text-lg">📁</span> <span class="hidden md:inline">Carregar Planilha</span><span class="md:hidden">Upload</span>
+                </label>
+            </div>
+        </div>
+    </header>
+
+    <div class="bg-[#fffbeb] border-b border-[#fcd34d] shrink-0 px-4 py-2 text-xs text-[#92400e] flex justify-between items-center" id="status-bar">
+        <p class="truncate mr-2">⚠️ Faça o upload da base.</p>
+        <span id="status-upload" class="font-bold whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm">Aguardando...</span>
+    </div>
+
+    <!-- Container Principal -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative pb-6">
+        
+        <!-- Bloco de Filtros (Accordion) -->
+        <section class="bg-white shadow-sm z-20 shrink-0 w-full mb-4">
+            <!-- Header do Filtro -->
+            <div class="px-4 py-3 border-b border-slate-100 flex justify-between items-center cursor-pointer md:cursor-default" onclick="toggleFilters()" id="filter-header">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">🔍</span>
+                    <h2 class="text-sm font-bold text-slate-700 uppercase">Filtros de Segmentação</h2>
+                </div>
+                <span class="text-slate-400 md:hidden transition-transform duration-300 font-bold" id="filter-icon">▼ TOQUE PARA ABRIR</span>
+            </div>
+
+            <!-- Corpo dos Filtros -->
+            <div id="filter-body" class="hidden md:block px-4 py-4 bg-slate-50 border-b border-slate-200">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Ano</label><select id="filter-ano" multiple></select></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Mês</label><select id="filter-mes" multiple></select></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Marca</label><select id="filter-marca" multiple></select></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Grupo Cliente</label><select id="filter-grupo" multiple></select></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Cliente</label><select id="filter-cliente" multiple></select></div>
+                    <div><label class="block text-xs font-bold text-slate-600 mb-1">Produto</label><select id="filter-produto" multiple></select></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Toggle Fat Net / Dev -->
+        <div class="px-4 mb-4">
+            <div class="flex bg-white rounded-xl shadow-sm p-1 border border-slate-200 w-full md:w-auto md:inline-flex relative">
+                <div class="absolute inset-y-1 left-1 w-[calc(50%-4px)] bg-brand-primary rounded-lg transition-transform duration-300 ease-in-out" id="toggle-bg"></div>
+                <button id="btn-fat-net" onclick="setFatType('fatNet')" class="relative z-10 w-1/2 md:w-32 py-2 text-sm font-bold text-white transition-colors duration-300">Fat. Net</button>
+                <button id="btn-fat-dev" onclick="setFatType('fatDev')" class="relative z-10 w-1/2 md:w-32 py-2 text-sm font-bold text-slate-500 transition-colors duration-300">Fat. - Dev.</button>
+            </div>
+        </div>
+
+        <!-- Dashboard -->
+        <div class="px-4 space-y-4">
+            
+            <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-l-brand-primary col-span-2 lg:col-span-1">
+                    <p class="text-xs text-slate-500 font-bold uppercase mb-1">Faturamento</p>
+                    <h3 class="text-2xl md:text-3xl font-black text-slate-800 tracking-tight" id="kpi-faturamento">R$ 0,00</h3>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-l-brand-secondary">
+                    <p class="text-xs text-slate-500 font-bold uppercase mb-1">Volume</p>
+                    <h3 class="text-xl md:text-2xl font-bold text-slate-800" id="kpi-volume">0</h3>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-l-[#f59e0b]">
+                    <p class="text-xs text-slate-500 font-bold uppercase mb-1">Clientes</p>
+                    <h3 class="text-xl md:text-2xl font-bold text-slate-800" id="kpi-clientes">0</h3>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="bg-white rounded-xl shadow-sm p-3 md:p-4 lg:col-span-3">
+                    <h3 class="text-sm md:text-base font-bold text-slate-800 mb-2">Evolução Mês a Mês</h3>
+                    <div class="w-full h-[250px] md:h-[350px] relative"><div class="chart-container"><canvas id="chartEvolucaoAno"></canvas></div></div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm p-3 md:p-4 lg:col-span-2">
+                    <h3 class="text-sm md:text-base font-bold text-slate-800 mb-2">Top 10 Grupos de Clientes</h3>
+                    <div class="w-full h-[300px] md:h-[400px] relative"><div class="chart-container"><canvas id="chartTopGrupos"></canvas></div></div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm p-3 md:p-4">
+                    <h3 class="text-sm md:text-base font-bold text-slate-800 mb-1">Representatividade por Marca</h3>
+                    <p class="text-[10px] text-slate-400 mb-2 uppercase">Share % e Valor</p>
+                    <div class="w-full h-[300px] md:h-[400px] relative"><div class="chart-container"><canvas id="chartMarcas"></canvas></div></div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm p-3 md:p-4 lg:col-span-3">
+                    <h3 class="text-sm md:text-base font-bold text-slate-800 mb-2">Top 10 Produtos em Faturamento</h3>
+                    <div class="w-full h-[350px] md:h-[450px] relative"><div class="chart-container"><canvas id="chartTopProdutos"></canvas></div></div>
+                </div>
+            </div>
+
+            <!-- Tabela Analítica -->
+            <div class="bg-white rounded-xl shadow-sm p-3 md:p-4 flex flex-col mb-10 h-[500px] md:h-[600px]">
+                <div class="mb-3">
+                    <h3 class="text-sm md:text-base font-bold text-slate-800">Detalhamento de Vendas</h3>
+                    <div class="flex justify-between items-center mt-1">
+                        <p class="text-xs text-brand-secondary md:hidden animate-pulse">👉 Deslize para o lado para ver mais</p>
+                        <p class="text-xs text-slate-500 hidden md:block">Busque digitando nas caixas abaixo das colunas.</p>
+                        <span id="table-count" class="text-[10px] font-bold text-brand-primary bg-blue-50 px-2 py-1 rounded"></span>
+                    </div>
+                </div>
+                
+                <div class="flex-1 overflow-x-auto overflow-y-auto border border-slate-200 rounded-lg custom-scrollbar hide-scroll-mobile relative">
+                    <table class="w-full text-left border-collapse min-w-[800px]">
+                        <thead>
+                            <tr>
+                                <th class="p-2 border-b text-xs font-bold text-slate-600 uppercase bg-slate-50 w-24">Data</th>
+                                <th class="p-2 border-b text-xs font-bold text-slate-600 uppercase bg-slate-50">Grupo Cliente</th>
+                                <th class="p-2 border-b text-xs font-bold text-slate-600 uppercase bg-slate-50">Cliente</th>
+                                <th class="p-2 border-b text-xs font-bold text-slate-600 uppercase bg-slate-50">Marca / Produto</th>
+                                <th class="p-2 border-b text-xs font-bold text-slate-600 uppercase bg-slate-50 text-center w-20">Desc.</th>
+                                <th class="p-2 border-b text-xs font-bold text-slate-600 uppercase bg-slate-50 text-right w-16">Vol.</th>
+                                <th class="p-2 border-b text-xs font-bold text-brand-primary uppercase bg-slate-50 text-right w-28">Faturamento</th>
+                            </tr>
+                            <tr class="th-filter-row bg-white border-b-2 border-slate-300">
+                                <th class="px-1"><input type="text" id="t-search-data" class="w-full border rounded p-1 text-[11px] outline-none focus:border-brand-primary" placeholder="Buscar..."></th>
+                                <th class="px-1"><input type="text" id="t-search-grupo" class="w-full border rounded p-1 text-[11px] outline-none focus:border-brand-primary" placeholder="Buscar..."></th>
+                                <th class="px-1"><input type="text" id="t-search-cliente" class="w-full border rounded p-1 text-[11px] outline-none focus:border-brand-primary" placeholder="Buscar..."></th>
+                                <th class="px-1"><input type="text" id="t-search-prod" class="w-full border rounded p-1 text-[11px] outline-none focus:border-brand-primary" placeholder="Buscar..."></th>
+                                <th colspan="3"></th> 
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="bg-white">
+                            <!-- JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // --- Controle UI Mobile ---
+        function toggleFilters() {
+            const body = document.getElementById('filter-body');
+            const icon = document.getElementById('filter-icon');
+            if (body.classList.contains('hidden')) {
+                body.classList.remove('hidden');
+                icon.style.transform = 'rotate(180deg)';
+                icon.textContent = '▲ TOQUE PARA FECHAR';
+            } else {
+                if(window.innerWidth < 768) {
+                    body.classList.add('hidden');
+                    icon.style.transform = 'rotate(0deg)';
+                    icon.textContent = '▼ TOQUE PARA ABRIR';
+                }
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            const body = document.getElementById('filter-body');
+            if(window.innerWidth >= 768) {
+                body.classList.remove('hidden');
+            } else {
+                body.classList.add('hidden');
+                document.getElementById('filter-icon').textContent = '▼ TOQUE PARA ABRIR';
+                document.getElementById('filter-icon').style.transform = 'rotate(0deg)';
+            }
+        });
+
+        Chart.register(ChartDataLabels);
+        Chart.defaults.plugins.datalabels = { display: false };
+
+        let rawData = [];
+        let filteredData = [];
+        let charts = {};
+        let choiceInstances = {};
+        let currentFatType = 'fatNet';
+
+        const MONTHS_ORDER = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+        const CHART_COLORS = ['#004b87', '#00a3e0', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#64748b'];
+
+        const formatBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+        const formatNum = new Intl.NumberFormat('pt-BR');
+        const formatPercent = new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 1 });
+
+        function setFatType(type) {
+            currentFatType = type;
+            const btnNet = document.getElementById('btn-fat-net');
+            const btnDev = document.getElementById('btn-fat-dev');
+            const bgToggle = document.getElementById('toggle-bg');
+
+            if (type === 'fatNet') {
+                bgToggle.style.transform = 'translateX(0)';
+                btnNet.classList.replace('text-slate-500', 'text-white');
+                btnDev.classList.replace('text-white', 'text-slate-500');
+            } else {
+                bgToggle.style.transform = 'translateX(100%)';
+                btnDev.classList.replace('text-slate-500', 'text-white');
+                btnNet.classList.replace('text-white', 'text-slate-500');
+            }
+
+            if(rawData.length > 0) applyGlobalFilters();
+        }
+
+        // --- Leitura do Excel ---
+        function parseMoney(valStr) {
+            if (valStr === undefined || valStr === null || valStr === '') return 0;
+            let cleaned = String(valStr).replace(/R\$/g, '').trim();
+            if (cleaned.includes(',') && cleaned.includes('.')) cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+            else if (cleaned.includes(',')) cleaned = cleaned.replace(',', '.');
+            const val = parseFloat(cleaned);
+            return isNaN(val) ? 0 : val;
+        }
+
+        function processDataEngine(dataRows) {
+            if (!dataRows || dataRows.length < 2) return;
+
+            let headerIdx = 0;
+            for(let i=0; i<Math.min(10, dataRows.length); i++){
+                if(dataRows[i].some(c => String(c).toLowerCase().includes('cliente') || String(c).toLowerCase().includes('produto'))) {
+                    headerIdx = i; break;
+                }
+            }
+
+            const headers = dataRows[headerIdx].map(h => String(h || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim());
+            let cMap = { ano: -1, mes: -1, cliente: -1, grupo: -1, marca: -1, produto: -1, fatNet: -1, fatDev: -1, desconto: -1, vendas: -1 };
+            
+            headers.forEach((h, i) => {
+                if (h.includes('ano')) cMap.ano = i;
+                else if (h.includes('mes') || (h.includes('m') && h.includes('s') && h.length < 15)) cMap.mes = i;
+                else if (h.includes('grupo')) cMap.grupo = i;
+                else if (h.includes('cliente') && !h.includes('grupo')) cMap.cliente = i;
+                else if (h.includes('marca')) cMap.marca = i;
+                else if (h.includes('produto')) cMap.produto = i;
+                else if (h.includes('net') || h.includes('fat. net')) cMap.fatNet = i;
+                else if (h.includes('fat') && h.includes('dev')) cMap.fatDev = i;
+                else if (h.includes('desconto')) cMap.desconto = i;
+                else if (h.includes('venda') || h.includes('quant')) cMap.vendas = i;
+            });
+
+            if (cMap.ano === -1) cMap.ano = 1;
+            if (cMap.mes === -1) cMap.mes = 2;
+            if (cMap.cliente === -1) cMap.cliente = 3;
+            if (cMap.grupo === -1) cMap.grupo = 4;
+            if (cMap.marca === -1) cMap.marca = 6;
+            if (cMap.produto === -1) cMap.produto = 7;
+            if (cMap.fatDev === -1) cMap.fatDev = 8; 
+            if (cMap.fatNet === -1) cMap.fatNet = 9; 
+            if (cMap.desconto === -1) cMap.desconto = 10;
+            if (cMap.vendas === -1) cMap.vendas = 11;
+
+            const parsedData = [];
+            
+            for (let i = headerIdx + 1; i < dataRows.length; i++) {
+                const row = dataRows[i];
+                if (!row || row.length < 5) continue;
+                
+                const getVal = (idx) => row[idx] !== undefined && row[idx] !== null ? String(row[idx]).trim() : '';
+                let ano = getVal(cMap.ano);
+                let cliente = getVal(cMap.cliente);
+                
+                let rawMes = getVal(cMap.mes).toLowerCase().trim();
+                let mes = '';
+                if (rawMes.includes('jan') || rawMes === '1' || rawMes === '01') mes = 'jan';
+                else if (rawMes.includes('fev') || rawMes === '2' || rawMes === '02') mes = 'fev';
+                else if (rawMes.includes('mar') || rawMes === '3' || rawMes === '03') mes = 'mar';
+                else if (rawMes.includes('abr') || rawMes === '4' || rawMes === '04') mes = 'abr';
+                else if (rawMes.includes('mai') || rawMes === '5' || rawMes === '05') mes = 'mai';
+                else if (rawMes.includes('jun') || rawMes === '6' || rawMes === '06') mes = 'jun';
+                else if (rawMes.includes('jul') || rawMes === '7' || rawMes === '07') mes = 'jul';
+                else if (rawMes.includes('ago') || rawMes === '8' || rawMes === '08') mes = 'ago';
+                else if (rawMes.includes('set') || rawMes === '9' || rawMes === '09') mes = 'set';
+                else if (rawMes.includes('out') || rawMes === '10') mes = 'out';
+                else if (rawMes.includes('nov') || rawMes === '11') mes = 'nov';
+                else if (rawMes.includes('dez') || rawMes === '12') mes = 'dez';
+
+                let fNetRaw = row[cMap.fatNet];
+                let fatNet = typeof fNetRaw === 'number' ? fNetRaw : parseMoney(String(fNetRaw));
+                let fDevRaw = row[cMap.fatDev];
+                let fatDev = typeof fDevRaw === 'number' ? fDevRaw : parseMoney(String(fDevRaw));
+
+                let descRaw = row[cMap.desconto];
+                let desconto = 0;
+                if (typeof descRaw === 'number') desconto = descRaw > 1 ? descRaw / 100 : descRaw;
+                else if (descRaw) desconto = parseFloat(String(descRaw).replace(',','.').replace('%','')) / 100;
+                if (isNaN(desconto)) desconto = 0;
+
+                let vQtdRaw = row[cMap.vendas];
+                let vendasQuant = typeof vQtdRaw === 'number' ? vQtdRaw : parseInt(String(vQtdRaw).replace(/\D/g, '')) || 0;
+
+                if (ano && mes && cliente) {
+                    parsedData.push({ 
+                        ano: String(ano), mes: String(mes), cliente: String(cliente).toUpperCase(), 
+                        grupoCliente: String(getVal(cMap.grupo)).toUpperCase() || 'SEM GRUPO', 
+                        marca: String(getVal(cMap.marca)).toUpperCase() || 'SEM MARCA', 
+                        produto: String(getVal(cMap.produto)).toUpperCase() || 'NÃO INFORMADO', 
+                        fatNet: fatNet || 0, fatDev: fatDev || 0, desconto: desconto, vendasQuant: vendasQuant || 0 
+                    });
+                }
+            }
+
+            if (parsedData.length > 0) {
+                rawData = parsedData;
+                const sb = document.getElementById('status-bar');
+                sb.classList.replace('bg-[#fffbeb]', 'bg-green-50');
+                sb.classList.replace('border-[#fcd34d]', 'border-green-200');
+                document.getElementById('status-upload').innerHTML = `✅ ${formatNum.format(parsedData.length)} lidas`;
+                document.getElementById('status-upload').classList.replace('bg-white', 'bg-green-100');
+                document.getElementById('status-upload').classList.add('text-green-800');
+                
+                initDashboard();
+            }
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (!file.name.toLowerCase().endsWith('.xlsx')) { alert("Apenas .xlsx"); e.target.value = ''; return; }
+
+            document.getElementById('status-upload').innerHTML = `⏳ Processando...`;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const data = new Uint8Array(event.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const jsonArray = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
+                    processDataEngine(jsonArray);
+                } catch (error) { alert("Erro ao processar."); }
+                e.target.value = ''; 
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // --- Gráficos ---
+        function groupAndSum(data, groupByField, sumField) {
+            const result = data.reduce((acc, curr) => {
+                const key = curr[groupByField];
+                if (!key) return acc;
+                acc[key] = (acc[key] || 0) + curr[sumField];
+                return acc;
+            }, {});
+            return Object.keys(result).map(key => ({ label: key, value: result[key] }));
+        }
+
+        function getTopN(groupedData, n) { return groupedData.sort((a, b) => b.value - a.value).slice(0, n); }
+        function truncateLabel(label, maxLen = 30) { 
+            if(window.innerWidth < 768) maxLen = 20; 
+            return (typeof label === 'string' && label.length > maxLen) ? label.substring(0, maxLen) + '...' : label; 
+        }
+
+        Chart.defaults.font.family = 'Inter, ui-sans-serif, system-ui, sans-serif';
+        Chart.defaults.color = '#64748b';
+        Chart.defaults.font.size = window.innerWidth < 768 ? 10 : 12;
+
+        function renderCharts(data) {
+            const totalFaturamento = data.reduce((sum, item) => sum + item[currentFatType], 0);
+            const nomeFatType = currentFatType === 'fatNet' ? 'Líquido' : 'Bruto/Dev.';
+
+            document.getElementById('kpi-faturamento').textContent = formatBRL.format(totalFaturamento);
+            document.getElementById('kpi-volume').textContent = formatNum.format(data.reduce((sum, item) => sum + item.vendasQuant, 0));
+            document.getElementById('kpi-clientes').textContent = formatNum.format(new Set(data.map(i => i.cliente)).size);
+
+            const ctxEvo = document.getElementById('chartEvolucaoAno').getContext('2d');
+            const ctxCli = document.getElementById('chartTopGrupos').getContext('2d');
+            const ctxProd = document.getElementById('chartTopProdutos').getContext('2d');
+            const ctxMarc = document.getElementById('chartMarcas').getContext('2d');
+
+            if (charts.evo) charts.evo.destroy(); if (charts.cli) charts.cli.destroy();
+            if (charts.prod) charts.prod.destroy(); if (charts.marc) charts.marc.destroy();
+
+            let years = [...new Set(data.map(d => d.ano))].filter(Boolean).sort();
+            charts.evo = new Chart(ctxEvo, {
+                type: 'line',
+                data: { 
+                    labels: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'], 
+                    datasets: years.map((year, i) => {
+                        const monthly = groupAndSum(data.filter(d => d.ano === year), 'mes', currentFatType);
+                        return {
+                            label: `Ano ${year}`, 
+                            data: MONTHS_ORDER.map(m => { const f = monthly.find(x => x.label === m); return f ? f.value : 0; }),
+                            borderColor: CHART_COLORS[i % CHART_COLORS.length], backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '20',
+                            borderWidth: 2, tension: 0.3, fill: false, pointRadius: 3
+                        };
+                    })
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label} (${nomeFatType}): ${formatBRL.format(c.raw)}` } }, legend: { position: window.innerWidth < 768 ? 'bottom' : 'top' } }, scales: { y: { ticks: { callback: v => formatNum.format(v) } } } }
+            });
+
+            const topGrupos = getTopN(groupAndSum(data, 'grupoCliente', currentFatType), 10);
+            charts.cli = new Chart(ctxCli, {
+                type: 'bar',
+                data: { labels: topGrupos.map(i => truncateLabel(i.label)), datasets: [{ data: topGrupos.map(i => i.value), backgroundColor: '#00a3e0', borderRadius: 4 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => formatBRL.format(c.raw) } } }, scales: { x: { ticks: { callback: v => formatNum.format(v) } } } }
+            });
+
+            const topProd = getTopN(groupAndSum(data, 'produto', currentFatType), 10);
+            charts.prod = new Chart(ctxProd, {
+                type: 'bar',
+                data: { labels: topProd.map(i => truncateLabel(i.label, 35)), datasets: [{ data: topProd.map(i => i.value), backgroundColor: '#004b87', borderRadius: 4 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => formatBRL.format(c.raw) } } }, scales: { x: { ticks: { callback: v => formatNum.format(v) } } } }
+            });
+
+            const topMarc = getTopN(groupAndSum(data, 'marca', currentFatType), 10);
+            const percentData = topMarc.map(item => ((item.value / (totalFaturamento || 1)) * 100).toFixed(1));
+            const rightPadding = window.innerWidth < 768 ? 90 : 120;
+            const labelSize = window.innerWidth < 768 ? 9 : 11;
+
+            charts.marc = new Chart(ctxMarc, {
+                type: 'bar',
+                data: { labels: topMarc.map(i => truncateLabel(i.label, 15)), datasets: [{ data: topMarc.map(i => i.value), backgroundColor: '#10b981', borderRadius: 4 }] },
+                options: { 
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, 
+                    layout: { padding: { right: rightPadding } },
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: function(c) { return `${formatBRL.format(c.raw)} (${percentData[c.dataIndex]}%)`; } } },
+                        datalabels: {
+                            display: true, anchor: 'end', align: 'right', color: '#475569',
+                            font: { weight: 'bold', size: labelSize },
+                            formatter: function(value, context) {
+                                if(window.innerWidth < 768 && value > 1000) {
+                                    return `R$ ${(value/1000).toFixed(1)}k (${percentData[context.dataIndex]}%)`;
+                                }
+                                return `${formatBRL.format(value)} (${percentData[context.dataIndex]}%)`;
+                            }
+                        }
+                    },
+                    scales: { x: { display: false, min: 0 } } 
+                }
+            });
+        }
+
+        // --- Tabela ---
+        function renderTable() {
+            const sData = document.getElementById('t-search-data').value.toLowerCase();
+            const sGrupo = document.getElementById('t-search-grupo').value.toLowerCase();
+            const sCliente = document.getElementById('t-search-cliente').value.toLowerCase();
+            const sProd = document.getElementById('t-search-prod').value.toLowerCase();
+
+            let tableData = filteredData.filter(item => {
+                const combinedData = (item.ano + '/' + item.mes).toLowerCase();
+                const combinedProd = (item.marca + ' ' + item.produto).toLowerCase();
+                return combinedData.includes(sData) && item.grupoCliente.toLowerCase().includes(sGrupo) &&
+                       item.cliente.toLowerCase().includes(sCliente) && combinedProd.includes(sProd);
+            });
+
+            tableData = tableData.sort((a,b) => b[currentFatType] - a[currentFatType]).slice(0, 200);
+
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+            
+            tableData.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-slate-100 hover:bg-slate-50";
+                let descClass = item.desconto > 0.15 ? "text-red-500 font-bold" : "text-slate-600";
+
+                tr.innerHTML = `
+                    <td class="p-2 text-[11px] whitespace-nowrap text-slate-500">${item.ano}/<span class="capitalize">${item.mes}</span></td>
+                    <td class="p-2 text-[11px] whitespace-nowrap text-slate-500 truncate max-w-[120px]">${item.grupoCliente}</td>
+                    <td class="p-2 text-[11px] font-medium text-slate-800 truncate max-w-[150px]">${item.cliente}</td>
+                    <td class="p-2 text-[11px] text-slate-600 truncate max-w-[180px]">
+                        <span class="font-bold text-brand-secondary">${item.marca}</span><br/><span class="text-[10px]">${item.produto}</span>
+                    </td>
+                    <td class="p-2 text-[11px] text-center ${descClass}">${formatPercent.format(item.desconto)}</td>
+                    <td class="p-2 text-[11px] text-slate-600 text-right">${formatNum.format(item.vendasQuant)}</td>
+                    <td class="p-2 text-[11px] font-bold text-brand-primary text-right whitespace-nowrap">${formatBRL.format(item[currentFatType])}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('table-count').textContent = `${formatNum.format(filteredData.length)} regs`;
+        }
+
+        ['t-search-data', 't-search-grupo', 't-search-cliente', 't-search-prod'].forEach(id => {
+            document.getElementById(id).addEventListener('input', renderTable);
+        });
+
+        // --- Filtros (Correção Principal) ---
+        function getChoicesValues(fieldId) {
+            if(!choiceInstances[fieldId]) return [];
+            const values = choiceInstances[fieldId].getValue(true);
+            return Array.isArray(values) ? values : (values ? [values] : []);
+        }
+
+        function applyGlobalFilters() {
+            const fAno = getChoicesValues('ano'); const fMes = getChoicesValues('mes');
+            const fMarca = getChoicesValues('marca'); const fProduto = getChoicesValues('produto');
+            const fCliente = getChoicesValues('cliente'); const fGrupo = getChoicesValues('grupo');
+
+            filteredData = rawData.filter(i => {
+                return (fAno.length === 0 || fAno.includes(i.ano)) && (fMes.length === 0 || fMes.includes(i.mes)) &&
+                       (fMarca.length === 0 || fMarca.includes(i.marca)) && (fProduto.length === 0 || fProduto.includes(i.produto)) &&
+                       (fCliente.length === 0 || fCliente.includes(i.cliente)) && (fGrupo.length === 0 || fGrupo.includes(i.grupoCliente));
+            });
+            renderCharts(filteredData); renderTable();
+        }
+
+        function initChoicesDropdown(fieldId, dataField, enableSearch) {
+            const el = document.getElementById('filter-' + fieldId);
+            let uniqueValues = [...new Set(rawData.map(item => item[dataField]))].filter(Boolean);
+            if (dataField === 'mes') uniqueValues = [...MONTHS_ORDER]; else uniqueValues.sort();
+
+            const choicesData = uniqueValues.map(val => {
+                let label = val;
+                if (dataField === 'mes') {
+                    const dict = {'jan':'Jan','fev':'Fev','mar':'Mar','abr':'Abr','mai':'Mai','jun':'Jun','jul':'Jul','ago':'Ago','set':'Set','out':'Out','nov':'Nov','dez':'Dez'};
+                    label = dict[val] || val;
+                }
+                return { value: String(val), label: String(label) };
+            });
+
+            if (choiceInstances[fieldId]) {
+                choiceInstances[fieldId].clearStore(); 
+                choiceInstances[fieldId].setChoices(choicesData, 'value', 'label', true);
+            } else {
+                choiceInstances[fieldId] = new Choices(el, {
+                    removeItemButton: true, 
+                    searchEnabled: enableSearch, /* Teclado não aparece nas opções fáceis */
+                    placeholder: true, 
+                    placeholderValue: 'Todos',
+                    searchPlaceholderValue: 'Buscar...', 
+                    noResultsText: 'Vazio', 
+                    itemSelectText: '',
+                    shouldSort: false, 
+                    position: 'bottom',
+                    allowHTML: true
+                });
+                choiceInstances[fieldId].setChoices(choicesData, 'value', 'label', true);
+                el.addEventListener('change', applyGlobalFilters);
+            }
+        }
+
+        // --- Correção de Inicialização (Força a exibição antes de renderizar) ---
+        function initDashboard() {
+            const filterBody = document.getElementById('filter-body');
+            const wasHidden = filterBody.classList.contains('hidden');
+            
+            // Garante que o container esteja visível para o JS calcular o tamanho corretamente
+            if(wasHidden) filterBody.classList.remove('hidden');
+
+            // Desativa a busca (teclado virtual) em listas pequenas
+            initChoicesDropdown('ano', 'ano', false); 
+            initChoicesDropdown('mes', 'mes', false);
+            initChoicesDropdown('grupo', 'grupoCliente', false); 
+            
+            // Mantém a busca para listas grandes
+            initChoicesDropdown('marca', 'marca', true); 
+            initChoicesDropdown('produto', 'produto', true);
+            initChoicesDropdown('cliente', 'cliente', true); 
+            
+            ['t-search-data', 't-search-grupo', 't-search-cliente', 't-search-prod'].forEach(id => document.getElementById(id).value = '');
+            applyGlobalFilters();
+
+            // Esconde novamente se for celular (Agora configurado de forma segura)
+            if(wasHidden && window.innerWidth < 768) {
+                filterBody.classList.add('hidden');
+                document.getElementById('filter-icon').style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // --- Start ---
+        const dummyData = [
+            ["", "Ano", "Mês", "Cliente", "Grupo Cliente", "Linha", "Marca", "Produto", "Fat. - Dev.", "Fat Net", "Desconto", "Qtd"],
+            ["", "2026", "jan", "PETSISTER - 34767", "PET SISTER - 18412", "-", "AGENER", "AGEMOXI 50MG", 3707.25, 2891.66, 0.25, 100],
+            ["", "2026", "fev", "PET SHOP SAUDE", "VAREJO", "-", "AGENER", "BALL FREE PASTA", 508.41, 359.88, 0.20, 12],
+            ["", "2024", "dez", "CLINICA VET", "CLINICAS", "-", "KRUUSE", "FOCINHEIRA", 49.00, 34.68, 0, 1]
+        ];
+        processDataEngine(dummyData);
+
+    </script>
+</body>
+</html>
